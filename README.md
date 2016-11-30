@@ -1,0 +1,6 @@
+# RealmDemo
+使用Realm的一个小Demo
+
+因为Realm使用很简单就并没有做封装
+
+除了依赖Realm之外，还在MyApplication中进行了Realm使用的初始化，这样就可以正常的使用Realm了。
