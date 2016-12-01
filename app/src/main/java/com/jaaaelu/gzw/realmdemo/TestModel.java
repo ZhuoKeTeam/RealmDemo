@@ -3,11 +3,12 @@ package com.jaaaelu.gzw.realmdemo;
 import android.os.Parcel;
 import android.os.Parcelable;
 
+import io.realm.RealmList;
 import io.realm.RealmObject;
 import io.realm.annotations.PrimaryKey;
 
 /**
- * Created by admin on 2016/11/28.
+ * Created by admin on 2016/11/28.通过继承实现
  */
 
 public class TestModel extends RealmObject{
@@ -15,6 +16,11 @@ public class TestModel extends RealmObject{
     private String _id;
     private String testTitle;
     private String updateTime;
+
+    //  用于测试数据库字段变更 版本变成是的时候放开下面的字段
+//    public int testBassType;
+//    public OtherTestModel testRealmObject;
+//    public RealmList<OtherTestModel> testRealmList;
 
     public String get_id() {
         return _id;

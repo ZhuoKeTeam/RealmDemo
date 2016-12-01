@@ -27,6 +27,7 @@ import java.util.UUID;
 
 import io.realm.Realm;
 import io.realm.RealmChangeListener;
+import io.realm.RealmConfiguration;
 import io.realm.RealmResults;
 
 public class MainActivity extends AppCompatActivity implements EditTextDialogFragment.ChangeContentListener {
@@ -43,6 +44,7 @@ public class MainActivity extends AppCompatActivity implements EditTextDialogFra
     private LinearLayout mEmptyView;                //  空View
     private Realm mRealm;                           //  Realm实例
     private String mCurrEditId;                     //  当前编辑着的条目的id
+    private int mCurrItemIndex;                     //  根据当前点击的下标对RealmResults进行操作
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -58,7 +60,16 @@ public class MainActivity extends AppCompatActivity implements EditTextDialogFra
      * 初始化数据
      */
     private void initData() {
-        mRealm = Realm.getDefaultInstance();
+        //  创建Realm对象 并使用默认的配置
+//        mRealm = Realm.getDefaultInstance();
+        //  Realm的配置类
+        RealmConfiguration config = new RealmConfiguration.Builder()
+                .name("test.realm")
+                .schemaVersion(3)
+                .migration(new MyMigration())
+                .build();
+        //  获取Realm对象并手动设置配置
+        mRealm = Realm.getInstance(config);
         queryResultAll();
         mDeleteList = new ArrayList<>();
     }
@@ -96,6 +107,7 @@ public class MainActivity extends AppCompatActivity implements EditTextDialogFra
         mResults.addChangeListener(new RealmChangeListener<RealmResults<TestModel>>() {
             @Override
             public void onChange(RealmResults<TestModel> element) {
+                //  这里无需再次赋值给RealmResults, 因为他会自动更新值(必须要当前前程有Looper, 而当前是主线程)
                 mResults = element;
                 mAdapter.notifyDataSetChanged();
             }
@@ -110,6 +122,7 @@ public class MainActivity extends AppCompatActivity implements EditTextDialogFra
                 fragment.setContentListener(MainActivity.this);
                 fragment.show(getSupportFragmentManager(), "EditTextDialogFragment");
                 mCurrEditId = mResults.get(i).get_id();
+                mCurrItemIndex = i;
             }
         });
     }
@@ -152,7 +165,9 @@ public class MainActivity extends AppCompatActivity implements EditTextDialogFra
         //  单个menu的点击事件
         switch (item.getItemId()) {
             case R.id.menu_add:
+                //  添加数据的两种方式
                 createItemData();
+                copyToRealm();
                 return true;
             case R.id.menu_delete:
                 setEditVisibility(true);
@@ -170,9 +185,10 @@ public class MainActivity extends AppCompatActivity implements EditTextDialogFra
     }
 
     /**
-     * 插入假数据 在后台线程进行
+     * 插入假数据 这种方式会产生默认值的对象,然后手动设置值,且如果有主键时需要在createObject中设置 在后台线程进行
      */
     private void createItemData() {
+        //  executeTransaction系列方法都会自动管理事务 开启，关闭，取消
         mRealm.executeTransactionAsync(new Realm.Transaction() {
             @Override
             public void execute(Realm realm) {
@@ -180,6 +196,34 @@ public class MainActivity extends AppCompatActivity implements EditTextDialogFra
                 TestModel testModel = realm.createObject(TestModel.class, uuid.toString());
                 testModel.setTestTitle("点击编辑标题");
                 testModel.setUpdateTime(getCurrTime());
+            }
+        }, new Realm.Transaction.OnSuccess() {
+            @Override
+            public void onSuccess() {
+//                queryResultAll();
+                mAdapter.notifyDataSetChanged();
+            }
+        }, new Realm.Transaction.OnError() {
+            @Override
+            public void onError(Throwable error) {
+                Log.e("Realm", "保存失败" + error.getMessage());
+            }
+        });
+    }
+
+    /**
+     * 插入假数据 在后台线程进行
+     */
+    private void copyToRealm() {
+        UUID uuid = UUID.randomUUID();
+        final TestModel testModel = new TestModel();
+        testModel.set_id(uuid.toString());
+        testModel.setTestTitle("点击编辑标题");
+        testModel.setUpdateTime(getCurrTime());
+        mRealm.executeTransactionAsync(new Realm.Transaction() {
+            @Override
+            public void execute(Realm realm) {
+                realm.copyToRealmOrUpdate(testModel);
             }
         }, new Realm.Transaction.OnSuccess() {
             @Override
@@ -208,9 +252,9 @@ public class MainActivity extends AppCompatActivity implements EditTextDialogFra
     }
 
     /**
-     * 更新数据 在后台线程进行
+     * 更新数据方式一 通过再次查询 在后台线程进行
      */
-    private void updateItemData(final String title) {
+    private void updateItemDataById(final String title) {
         mRealm.executeTransactionAsync(new Realm.Transaction() {
             @Override
             public void execute(Realm realm) {
@@ -232,11 +276,25 @@ public class MainActivity extends AppCompatActivity implements EditTextDialogFra
     }
 
     /**
-     * 根据标题查询数据 在后台线程进行
+     * 更新数据方法二 通过Realm的特性 在创建RealmResults的线程进行
+     */
+    private void updateItemData(final String title) {
+        mRealm.executeTransaction(new Realm.Transaction() {
+            @Override
+            public void execute(Realm realm) {
+                mResults.get(mCurrItemIndex).setTestTitle(title);
+                mResults.get(mCurrItemIndex).setUpdateTime(getCurrTime());
+            }
+        });
+        mAdapter.notifyDataSetChanged();
+    }
+
+    /**
+     * 根据标题查询数据 在UI线程进行
      */
     private void queryResultByTitle(String title) {
         mResults = mRealm.where(TestModel.class)
-                .equalTo("testTitle", title)
+                .contains("testTitle", title)
                 .findAll();
         mAdapter.notifyDataSetChanged();
     }
@@ -247,7 +305,6 @@ public class MainActivity extends AppCompatActivity implements EditTextDialogFra
     private void queryResultAll() {
         mResults = mRealm.where(TestModel.class).findAllAsync();
     }
-
 
     /**
      * 获取当前时间
@@ -269,6 +326,8 @@ public class MainActivity extends AppCompatActivity implements EditTextDialogFra
                 queryResultByTitle(newContent);
             }
         } else {
+            //  两种方法都可以达到更新的效果，但后者效率会高一些因为不用再次查询
+//            updateItemDataById(newContent);
             updateItemData(newContent);
         }
     }
@@ -287,6 +346,14 @@ public class MainActivity extends AppCompatActivity implements EditTextDialogFra
         } else {
             super.onBackPressed();
         }
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        //  移除侦听 并关闭Realm
+        mResults.removeChangeListeners();
+        mRealm.close();
     }
 
     class MyAdapter extends BaseAdapter {
